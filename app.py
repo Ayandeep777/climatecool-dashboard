@@ -4,6 +4,9 @@ import numpy as np
 from datetime import datetime
 import logging
 import os
+import streamlit as st
+import pandas as pd
+from pathlib import Path
 
 # Try to import from config, fallback if not found
 try:
@@ -108,6 +111,35 @@ with st.sidebar:
     temp_anomaly = st.slider("Temperature Anomaly (°C)", -2.0, 5.0, 0.0, 0.5)
     marketing_uplift = st.slider("Marketing Uplift (%)", -50, 100, 0, 10)
 
+def check_and_load_data():
+    """Check if data file exists, if not, offer upload."""
+    data_dir = Path("data")
+    data_dir.mkdir(exist_ok=True)
+    
+    excel_files = list(data_dir.glob("*.xlsx"))
+    
+    if not excel_files:
+        st.warning("📁 No Excel data file found in the 'data' directory.")
+        
+        # Allow file upload
+        uploaded_file = st.file_uploader(
+            "Upload the ClimateCool Excel data file",
+            type=['xlsx'],
+            help="Upload the Excel file from the data/ directory"
+        )
+        
+        if uploaded_file is not None:
+            # Save the uploaded file
+            file_path = data_dir / "V-Guard ClimateCool PowerBI Data Model and Datasets.xlsx"
+            with open(file_path, "wb") as f:
+                f.write(uploaded_file.getbuffer())
+            st.success(f"✅ File saved successfully! Loading data...")
+            st.rerun()
+        return False
+    return True
+
+
+
 # ========== MAIN DASHBOARD ==========
 st.header("🏢 Executive Dashboard")
 
@@ -121,6 +153,11 @@ with col3:
     st.metric("Heat Score", "67.4", "↑ 3.1%")
 with col4:
     st.metric("Active Districts", "22", "→")
+
+def main():
+    # Check for data file
+    if not check_and_load_data():
+        st.stop()
 
 # Show some data
 if 'DIM_DISTRICT' in data and not data['DIM_DISTRICT'].empty:
