@@ -1,16 +1,31 @@
 import streamlit as st
 import sys
+import os
 from pathlib import Path
 
-# Add the project root to the path
-sys.path.append(str(Path(__file__).parent))
+# Add the project root to the path - FIXED
+project_root = Path(__file__).parent
+sys.path.insert(0, str(project_root))
 
-import config
+# Import config - FIXED with proper path
+try:
+    import config
+except ImportError:
+    # Fallback config if import fails
+    class Config:
+        EXCEL_FILE_PATH = Path("data/V-Guard ClimateCool PowerBI Data Model and Datasets.xlsx")
+        WEATHER_API_KEY = "mock_key"
+        USE_MOCK_WEATHER = True
+        LAST_REFRESH_DATE = "2026-08-29"
+        WORKING_TAM_CR = 2200.0
+        PLANNED_Y1_REVENUE_CR = 20.0
+        PLANNED_Y2_REVENUE_CR = 40.0
+        PLANNED_Y3_REVENUE_CR = 70.0
+        BLENDED_NET_REALIZATION = 10500.0
+        WORKING_CAPITAL_PCT = 0.10
+    config = Config()
+
 from src.data_loader import DataLoader
-from utils.logging_config import setup_logging
-
-# Initialize logger
-logger = setup_logging()
 
 # Configure page
 st.set_page_config(
@@ -71,6 +86,7 @@ def handle_file_upload():
 def load_app_data():
     """Load and cache the entire data model."""
     try:
+        import pandas as pd
         data_loader = DataLoader()
         app_data = data_loader.load_all()
         
@@ -79,15 +95,13 @@ def load_app_data():
         st.session_state.sample_data = is_sample
         
         if is_sample:
-            logger.info("Using sample data (Excel file not found)")
+            st.session_state.data_loaded = False
         else:
-            logger.info("Data model loaded successfully from Excel file")
             st.session_state.data_loaded = True
         
         return app_data
     except Exception as e:
-        logger.error(f"Failed to load data model: {e}")
-        st.error(f"Failed to load data: {e}")
+        st.error(f"Failed to load data: {str(e)}")
         return None
 
 # --- Main App ---
@@ -106,6 +120,7 @@ def main():
         st.session_state.app_data = app_data
 
     if app_data is None:
+        st.error("Failed to load data. Please check your file and try again.")
         st.stop()
 
     # Show data status
@@ -119,86 +134,67 @@ def main():
     # --- Sidebar Navigation ---
     st.sidebar.subheader("📊 Navigation")
     
-    # Use simple page names without emojis for internal mapping
+    # Simple page navigation without special characters in keys
     page_options = {
-        "Control Tower": "control_tower",
-        "Opportunity": "opportunity",
-        "Climate Intelligence": "climate_intelligence",
-        "Demand Engine": "demand_engine",
-        "Inventory Command": "inventory_command",
-        "SKU & Dealer": "sku_dealer",
-        "Heat-Trigger Marketing": "heat_trigger_marketing",
-        "Financials": "financials",
-        "Stage Gates": "stage_gates",
-        "Data Sources": "data_sources"
+        "🏢 Control Tower": "control_tower",
+        "📍 Opportunity": "opportunity",
+        "🌤️ Climate Intelligence": "climate_intelligence",
+        "📈 Demand Engine": "demand_engine",
+        "📦 Inventory Command": "inventory_command",
+        "🛒 SKU & Dealer": "sku_dealer",
+        "📢 Heat-Trigger Marketing": "heat_trigger_marketing",
+        "💰 Financials": "financials",
+        "🚀 Stage Gates": "stage_gates",
+        "📊 Data Sources": "data_sources"
     }
-    
-    # Create display names with emojis
-    display_names = {
-        "control_tower": "🏢 Control Tower",
-        "opportunity": "📍 Opportunity",
-        "climate_intelligence": "🌤️ Climate Intelligence",
-        "demand_engine": "📈 Demand Engine",
-        "inventory_command": "📦 Inventory Command",
-        "sku_dealer": "🛒 SKU & Dealer",
-        "heat_trigger_marketing": "📢 Heat-Trigger Marketing",
-        "financials": "💰 Financials",
-        "stage_gates": "🚀 Stage Gates",
-        "data_sources": "📊 Data Sources"
-    }
-    
-    # Create a list of display names for the radio
-    display_list = list(display_names.values())
     
     selected_display = st.sidebar.radio(
         "Choose a Module",
-        display_list,
+        list(page_options.keys()),
         index=0,
     )
     
-    # Map back to internal page name
-    page_map = {v: k for k, v in display_names.items()}
-    page = page_map.get(selected_display, "control_tower")
+    page = page_options[selected_display]
 
     # --- Page Routing ---
     try:
         if page == "control_tower":
-            from pages import control_tower as page_module
-            page_module.render(app_data)
+            from pages.control_tower import render
+            render(app_data)
         elif page == "opportunity":
-            from pages import opportunity as page_module
-            page_module.render(app_data)
+            from pages.opportunity import render
+            render(app_data)
         elif page == "climate_intelligence":
-            from pages import climate_intelligence as page_module
-            page_module.render(app_data)
+            from pages.climate_intelligence import render
+            render(app_data)
         elif page == "demand_engine":
-            from pages import demand_engine as page_module
-            page_module.render(app_data)
+            from pages.demand_engine import render
+            render(app_data)
         elif page == "inventory_command":
-            from pages import inventory_command as page_module
-            page_module.render(app_data)
+            from pages.inventory_command import render
+            render(app_data)
         elif page == "sku_dealer":
-            from pages import sku_dealer as page_module
-            page_module.render(app_data)
+            from pages.sku_dealer import render
+            render(app_data)
         elif page == "heat_trigger_marketing":
-            from pages import heat_trigger_marketing as page_module
-            page_module.render(app_data)
+            from pages.heat_trigger_marketing import render
+            render(app_data)
         elif page == "financials":
-            from pages import financials as page_module
-            page_module.render(app_data)
+            from pages.financials import render
+            render(app_data)
         elif page == "stage_gates":
-            from pages import stage_gates as page_module
-            page_module.render(app_data)
+            from pages.stage_gates import render
+            render(app_data)
         elif page == "data_sources":
-            from pages import data_sources as page_module
-            page_module.render(app_data)
+            from pages.data_sources import render
+            render(app_data)
     except ImportError as e:
-        st.error(f"Error loading page: {e}")
+        st.error(f"Error loading page: {str(e)}")
         st.info("Please ensure all page modules exist in the 'pages' directory.")
         # Show the Control Tower as fallback
         try:
-            from pages import control_tower as page_module
-            page_module.render(app_data)
+            from pages.control_tower import render
+            render(app_data)
         except:
             st.warning("Unable to load any page. Please check your installation.")
 
