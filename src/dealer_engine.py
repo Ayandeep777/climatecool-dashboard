@@ -1,5 +1,4 @@
 import pandas as pd
-import numpy as np
 import logging
 
 logger = logging.getLogger(__name__)
@@ -7,9 +6,8 @@ logger = logging.getLogger(__name__)
 class DealerEngine:
     """Analyzes dealer performance and provides insights."""
 
-    def __init__(self, dealer_df: pd.DataFrame, sales_df: pd.DataFrame):
+    def __init__(self, dealer_df: pd.DataFrame):
         self.dealer_df = dealer_df
-        self.sales_df = sales_df
 
     def get_dealer_performance(self, district_id=None):
         """Get dealer performance metrics."""
@@ -20,7 +18,6 @@ class DealerEngine:
         if district_id:
             df = df[df['District_ID'] == district_id]
         
-        # Calculate dealer tiers distribution
         tier_dist = df['Dealer_Tier'].value_counts().reset_index()
         tier_dist.columns = ['Tier', 'Count']
         
