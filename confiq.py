@@ -18,7 +18,7 @@ else:
     if excel_files:
         EXCEL_FILE_PATH = excel_files[0]
     else:
-        EXCEL_FILE_PATH = DATA_DIR / "V-Guard ClimateCool PowerBI Data Model and Datasets.xlsx"
+        EXCEL_FILE_PATH = data / "V-Guard ClimateCool PowerBI Data Model and Datasets.xlsx"
 
 # --- Weather API ---
 WEATHER_API_KEY = os.getenv("WEATHER_API_KEY", "4cca9dae74e69a773a7377d156058597")
