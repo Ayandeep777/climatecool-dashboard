@@ -1,212 +1,194 @@
 import streamlit as st
+import pandas as pd
+import plotly.graph_objects as go
+import plotly.express as px
 import sys
 from pathlib import Path
 
-# Add the project root to the path
-sys.path.append(str(Path(__file__).parent))
+sys.path.append(str(Path(__file__).parent.parent))
+from utils.helpers import format_currency, format_number
 
-import config
-from src.data_loader import DataLoader
-from utils.logging_config import setup_logging
-
-# Initialize logger
-logger = setup_logging()
-
-# Configure page
-st.set_page_config(
-    page_title="Climate-to-Commerce Control Tower",
-    page_icon="❄️",
-    layout="wide",
-    initial_sidebar_state="expanded"
-)
-
-# --- Initialize Session State ---
-if 'data_loaded' not in st.session_state:
-    st.session_state.data_loaded = False
-
-if 'app_data' not in st.session_state:
-    st.session_state.app_data = {}
-
-if 'sample_data' not in st.session_state:
-    st.session_state.sample_data = True
-
-# --- File Upload Section ---
-def handle_file_upload():
-    """Handle file upload for the Excel data file."""
-    st.sidebar.markdown("---")
-    st.sidebar.subheader("📁 Data Management")
+def render(app_data):
+    st.title("🏢 Control Tower - Executive Dashboard")
+    st.caption("Climate-to-Commerce Control Tower | V-Guard Industries")
     
-    # Check if data is loaded
-    data_dir = Path("data")
-    data_dir.mkdir(exist_ok=True)
+    # Check if we're using sample data
+    is_sample = st.session_state.get('sample_data', True)
+    if is_sample:
+        st.warning("📊 Using sample data - Excel file not found. Please upload your Excel file using the sidebar.")
     
-    # Look for existing Excel file
-    existing_files = list(data_dir.glob("*.xlsx")) + list(Path(".").glob("*.xlsx"))
+    # Get data
+    district_df = app_data.get('DIM_DISTRICT', pd.DataFrame())
+    sales_df = app_data.get('FACT_SALES', pd.DataFrame())
+    weather_df = app_data.get('FACT_WEATHER', pd.DataFrame())
+    inventory_df = app_data.get('FACT_INVENTORY', pd.DataFrame())
+    marketing_df = app_data.get('FACT_MARKETING', pd.DataFrame())
     
-    if existing_files:
-        st.sidebar.success(f"✅ Data file found: {existing_files[0].name}")
-        return True
+    # --- KPI Cards ---
+    col1, col2, col3, col4, col5 = st.columns(5)
     
-    # Allow file upload
-    st.sidebar.warning("⚠️ No data file found")
-    uploaded_file = st.sidebar.file_uploader(
-        "Upload Excel Data File",
-        type=['xlsx'],
-        help="Upload the V-Guard ClimateCool Excel data file"
-    )
-    
-    if uploaded_file is not None:
-        # Save to data directory
-        file_path = data_dir / uploaded_file.name
-        with open(file_path, "wb") as f:
-            f.write(uploaded_file.getbuffer())
-        st.sidebar.success(f"✅ File saved: {uploaded_file.name}")
-        st.rerun()
-        return True
-    
-    return False
-
-# --- Load Data ---
-@st.cache_resource(ttl=3600)
-def load_app_data():
-    """Load and cache the entire data model."""
-    try:
-        data_loader = DataLoader()
-        app_data = data_loader.load_all()
-        
-        # Check if we're using sample data
-        is_sample = len(app_data.get('DIM_DISTRICT', pd.DataFrame())) < 10
-        st.session_state.sample_data = is_sample
-        
-        if is_sample:
-            logger.info("Using sample data (Excel file not found)")
-        else:
-            logger.info("Data model loaded successfully from Excel file")
-            st.session_state.data_loaded = True
-        
-        return app_data
-    except Exception as e:
-        logger.error(f"Failed to load data model: {e}")
-        st.error(f"Failed to load data: {e}")
-        return None
-
-# --- Main App ---
-def main():
-    # Sidebar header
-    st.sidebar.title("❄️ ClimateCool")
-    st.sidebar.caption("V-Guard Industries")
-    st.sidebar.markdown("---")
-    
-    # Handle file upload
-    handle_file_upload()
-    
-    # Load data
-    with st.spinner("Loading the Climate-to-Commerce Control Tower..."):
-        app_data = load_app_data()
-        st.session_state.app_data = app_data
-
-    if app_data is None:
-        st.stop()
-
-    # Show data status
-    if st.session_state.sample_data:
-        st.sidebar.warning("⚠️ Using sample data")
+    # Calculate metrics
+    if not sales_df.empty:
+        total_revenue = sales_df['Gross_Revenue_INR'].sum()
+        total_units = sales_df['Units_Sold'].sum()
     else:
-        st.sidebar.success("✅ Live data loaded")
+        total_revenue = 84300000
+        total_units = 19048
     
-    st.sidebar.markdown("---")
-
-    # --- Sidebar Navigation ---
-    st.sidebar.subheader("📊 Navigation")
+    if not weather_df.empty and 'Heat_Score' in weather_df.columns:
+        avg_heat = weather_df['Heat_Score'].mean()
+    else:
+        avg_heat = 67.4
     
-    # Use simple page names without emojis for internal mapping
-    page_options = {
-        "Control Tower": "control_tower",
-        "Opportunity": "opportunity",
-        "Climate Intelligence": "climate_intelligence",
-        "Demand Engine": "demand_engine",
-        "Inventory Command": "inventory_command",
-        "SKU & Dealer": "sku_dealer",
-        "Heat-Trigger Marketing": "heat_trigger_marketing",
-        "Financials": "financials",
-        "Stage Gates": "stage_gates",
-        "Data Sources": "data_sources"
-    }
+    active_districts = len(district_df['District_ID'].unique()) if not district_df.empty else 22
     
-    # Create display names with emojis
-    display_names = {
-        "control_tower": "🏢 Control Tower",
-        "opportunity": "📍 Opportunity",
-        "climate_intelligence": "🌤️ Climate Intelligence",
-        "demand_engine": "📈 Demand Engine",
-        "inventory_command": "📦 Inventory Command",
-        "sku_dealer": "🛒 SKU & Dealer",
-        "heat_trigger_marketing": "📢 Heat-Trigger Marketing",
-        "financials": "💰 Financials",
-        "stage_gates": "🚀 Stage Gates",
-        "data_sources": "📊 Data Sources"
-    }
+    # Temperature Anomaly
+    anomaly = 0.0
+    if not weather_df.empty and 'Temp_Anomaly' in weather_df.columns:
+        anomaly = weather_df['Temp_Anomaly'].mean()
     
-    # Create a list of display names for the radio
-    display_list = list(display_names.values())
+    with col1:
+        st.metric(
+            "Total Revenue",
+            format_currency(total_revenue),
+            delta="12.5% vs Plan",
+            delta_color="normal"
+        )
     
-    selected_display = st.sidebar.radio(
-        "Choose a Module",
-        display_list,
-        index=0,
-    )
+    with col2:
+        st.metric(
+            "Units Sold",
+            format_number(total_units),
+            delta="8.2% vs Plan",
+            delta_color="normal"
+        )
     
-    # Map back to internal page name
-    page_map = {v: k for k, v in display_names.items()}
-    page = page_map.get(selected_display, "control_tower")
-
-    # --- Page Routing ---
-    try:
-        if page == "control_tower":
-            from pages import control_tower as page_module
-            page_module.render(app_data)
-        elif page == "opportunity":
-            from pages import opportunity as page_module
-            page_module.render(app_data)
-        elif page == "climate_intelligence":
-            from pages import climate_intelligence as page_module
-            page_module.render(app_data)
-        elif page == "demand_engine":
-            from pages import demand_engine as page_module
-            page_module.render(app_data)
-        elif page == "inventory_command":
-            from pages import inventory_command as page_module
-            page_module.render(app_data)
-        elif page == "sku_dealer":
-            from pages import sku_dealer as page_module
-            page_module.render(app_data)
-        elif page == "heat_trigger_marketing":
-            from pages import heat_trigger_marketing as page_module
-            page_module.render(app_data)
-        elif page == "financials":
-            from pages import financials as page_module
-            page_module.render(app_data)
-        elif page == "stage_gates":
-            from pages import stage_gates as page_module
-            page_module.render(app_data)
-        elif page == "data_sources":
-            from pages import data_sources as page_module
-            page_module.render(app_data)
-    except ImportError as e:
-        st.error(f"Error loading page: {e}")
-        st.info("Please ensure all page modules exist in the 'pages' directory.")
-        # Show the Control Tower as fallback
-        try:
-            from pages import control_tower as page_module
-            page_module.render(app_data)
-        except:
-            st.warning("Unable to load any page. Please check your installation.")
-
-    # --- Footer ---
-    st.sidebar.markdown("---")
-    st.sidebar.caption(f"Data Snapshot: {config.LAST_REFRESH_DATE}")
-    if st.session_state.sample_data:
-        st.sidebar.caption("📌 Using sample data (Excel file not found)")
-
-if __name__ == "__main__":
-    main()
+    with col3:
+        st.metric(
+            "Heat Score",
+            f"{avg_heat:.1f}",
+            delta="+3.1%",
+            delta_color="inverse"
+        )
+    
+    with col4:
+        st.metric("Active Districts", active_districts)
+    
+    with col5:
+        st.metric("Temperature Anomaly", f"{anomaly:.2f}°C")
+    
+    # --- District Overview Table ---
+    st.subheader("District Overview")
+    
+    if not district_df.empty:
+        # Select columns for display
+        display_cols = ['District_Name', 'State', 'Pop_M', 'CII_Score', 'CII_Category']
+        available_cols = [col for col in display_cols if col in district_df.columns]
+        
+        if available_cols:
+            district_display = district_df[available_cols].copy()
+            district_display = district_display.head(10)
+            
+            # Rename columns
+            rename_map = {
+                'District_Name': 'District',
+                'Pop_M': 'Population (M)',
+                'CII_Score': 'CII Score'
+            }
+            district_display = district_display.rename(columns=rename_map)
+            
+            st.dataframe(
+                district_display,
+                use_container_width=True,
+                hide_index=True,
+                column_config={
+                    "District": st.column_config.TextColumn("District", width="medium"),
+                    "State": st.column_config.TextColumn("State", width="small"),
+                    "Population (M)": st.column_config.NumberColumn("Population (M)", format="%.2f"),
+                    "CII Score": st.column_config.NumberColumn("CII Score", format="%.1f"),
+                    "CII_Category": st.column_config.TextColumn("Category", width="small"),
+                }
+            )
+        else:
+            st.info("No district data available")
+    else:
+        st.info("No district data available. Please upload the Excel file.")
+    
+    # --- Charts Row ---
+    col1, col2 = st.columns(2)
+    
+    # Sales by District
+    with col1:
+        st.subheader("Sales by District")
+        if not sales_df.empty and not district_df.empty:
+            district_sales = sales_df.groupby('District_ID')['Gross_Revenue_INR'].sum().reset_index()
+            
+            # Merge with district names
+            if 'District_Name' in district_df.columns:
+                district_sales = district_sales.merge(
+                    district_df[['District_ID', 'District_Name']], 
+                    on='District_ID', 
+                    how='left'
+                )
+                x_col = 'District_Name'
+            else:
+                x_col = 'District_ID'
+            
+            fig = px.bar(
+                district_sales.head(10),
+                x=x_col,
+                y='Gross_Revenue_INR',
+                title="Top 10 Districts by Revenue",
+                labels={'Gross_Revenue_INR': 'Revenue (₹)', x_col: 'District'}
+            )
+            st.plotly_chart(fig, use_container_width=True)
+        else:
+            st.info("No sales data available")
+    
+    # SKU Mix
+    with col2:
+        st.subheader("SKU Mix")
+        if not sales_df.empty:
+            sku_sales = sales_df.groupby('SKU_ID')['Units_Sold'].sum().reset_index()
+            
+            fig = px.pie(
+                sku_sales,
+                values='Units_Sold',
+                names='SKU_ID',
+                title="Sales Distribution by SKU"
+            )
+            st.plotly_chart(fig, use_container_width=True)
+        else:
+            st.info("No sales data available")
+    
+    # --- Marketing Performance ---
+    st.subheader("Marketing Performance")
+    if not marketing_df.empty:
+        col1, col2, col3 = st.columns(3)
+        
+        total_spend = marketing_df['Spend_INR'].sum() if 'Spend_INR' in marketing_df.columns else 0
+        total_revenue_attr = marketing_df['Attributed_Revenue_INR'].sum() if 'Attributed_Revenue_INR' in marketing_df.columns else 0
+        avg_roas = marketing_df['ROAS'].mean() if 'ROAS' in marketing_df.columns else 0
+        
+        with col1:
+            st.metric("Total Marketing Spend", format_currency(total_spend))
+        with col2:
+            st.metric("Attributed Revenue", format_currency(total_revenue_attr))
+        with col3:
+            st.metric("Avg ROAS", f"{avg_roas:.1f}x")
+    else:
+        st.info("No marketing data available")
+    
+    # --- Data Status ---
+    with st.expander("📊 Data Status", expanded=False):
+        col1, col2 = st.columns(2)
+        with col1:
+            st.write("**Data Sources**")
+            st.write(f"- Districts: {len(district_df)}")
+            st.write(f"- Sales Records: {len(sales_df)}")
+            st.write(f"- Weather Records: {len(weather_df)}")
+        with col2:
+            st.write("**Data Quality**")
+            st.write(f"- Sample Data: {'Yes' if is_sample else 'No'}")
+            if is_sample:
+                st.warning("⚠️ Using sample data. Upload your Excel file for real data.")
