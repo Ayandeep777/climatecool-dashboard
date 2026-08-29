@@ -3,6 +3,8 @@ import streamlit as st
 from pathlib import Path
 import os
 import sys
+import tempfile
+import shutil
 sys.path.append(str(Path(__file__).parent.parent))
 
 import config
@@ -14,49 +16,86 @@ class DataLoader:
     """Loads and processes all sheets from the Excel data model."""
 
     def __init__(self, file_path: str = None):
-        # Handle file path for both local and cloud deployment
-        if file_path is None:
-            # Try multiple possible locations
-            possible_paths = [
-                config.EXCEL_FILE_PATH,
-                Path("data/V-Guard ClimateCool PowerBI Data Model and Datasets.xlsx"),
-                Path("/mount/src/climatecool-dashboard/data/V-Guard ClimateCool PowerBI Data Model and Datasets.xlsx"),
-                Path("app/data/V-Guard ClimateCool PowerBI Data Model and Datasets.xlsx"),
-            ]
-            
-            # Find the first existing path
-            for path in possible_paths:
-                if path.exists():
-                    self.file_path = str(path)
-                    break
-            else:
-                # If no file found, try to find any .xlsx file in data directory
-                data_dir = Path("data")
-                if data_dir.exists():
-                    excel_files = list(data_dir.glob("*.xlsx"))
-                    if excel_files:
-                        self.file_path = str(excel_files[0])
-                    else:
-                        self.file_path = str(config.EXCEL_FILE_PATH)
-                else:
-                    self.file_path = str(config.EXCEL_FILE_PATH)
-        else:
-            self.file_path = file_path
-            
+        self.file_path = None
+        self.file_found = False
         self.data = {}
+        
+        # Try to find the file in multiple locations
+        if file_path:
+            self.file_path = file_path
+        else:
+            self.file_path = self._find_excel_file()
+        
         logger.info(f"DataLoader initialized with file: {self.file_path}")
+        logger.info(f"File exists: {Path(self.file_path).exists() if self.file_path else False}")
+
+    def _find_excel_file(self):
+        """Find the Excel file in various possible locations."""
+        possible_paths = [
+            # Current directory paths
+            Path("data/V-Guard ClimateCool PowerBI Data Model and Datasets.xlsx"),
+            Path("data/V-Guard ClimateCool PowerBI Data Model and Datasets.xlsx"),
+            Path("./data/V-Guard ClimateCool PowerBI Data Model and Datasets.xlsx"),
+            Path("../data/V-Guard ClimateCool PowerBI Data Model and Datasets.xlsx"),
+            
+            # Streamlit Cloud paths
+            Path("/mount/src/climatecool-dashboard/data/V-Guard ClimateCool PowerBI Data Model and Datasets.xlsx"),
+            Path("/app/data/V-Guard ClimateCool PowerBI Data Model and Datasets.xlsx"),
+            
+            # Look for any Excel file in data directory
+            Path("data").glob("*.xlsx"),
+            Path("./data").glob("*.xlsx"),
+            
+            # Current working directory
+            Path("V-Guard ClimateCool PowerBI Data Model and Datasets.xlsx"),
+            Path("ClimateCool.xlsx"),
+        ]
+        
+        # Check each path
+        for path in possible_paths:
+            if isinstance(path, Path) and path.exists():
+                logger.info(f"Found Excel file at: {path}")
+                return str(path)
+        
+        # Try to find any .xlsx file in data directory
+        data_dir = Path("data")
+        if data_dir.exists():
+            excel_files = list(data_dir.glob("*.xlsx"))
+            if excel_files:
+                logger.info(f"Found Excel file at: {excel_files[0]}")
+                return str(excel_files[0])
+        
+        # Check if file is in current directory
+        excel_files = list(Path(".").glob("*.xlsx"))
+        if excel_files:
+            logger.info(f"Found Excel file in current directory: {excel_files[0]}")
+            return str(excel_files[0])
+        
+        logger.warning("No Excel file found in any location")
+        return None
 
     def load_all(self) -> dict:
         """Load all sheets into a dictionary of DataFrames."""
         try:
-            # Check if file exists
-            if not Path(self.file_path).exists():
-                logger.error(f"Excel file not found at {self.file_path}")
-                st.error(f"❌ Data file not found. Please ensure the Excel file is in the 'data/' directory.")
-                st.info("📁 Looking for: " + self.file_path)
-                return self._create_sample_data()
+            # If file_path is None or file doesn't exist, try to find it again
+            if not self.file_path or not Path(self.file_path).exists():
+                self.file_path = self._find_excel_file()
+                
+                if not self.file_path or not Path(self.file_path).exists():
+                    logger.error("Excel file not found")
+                    st.warning("📁 Excel file not found. Please upload the file.")
+                    return self._create_sample_data()
 
-            excel_file = pd.ExcelFile(self.file_path)
+            logger.info(f"Loading Excel file from: {self.file_path}")
+            
+            # Check if file is readable
+            try:
+                excel_file = pd.ExcelFile(self.file_path)
+            except Exception as e:
+                logger.error(f"Error reading Excel file: {e}")
+                st.error(f"❌ Error reading Excel file: {e}")
+                return self._create_sample_data()
+            
             sheet_names = excel_file.sheet_names
             logger.info(f"Found sheets: {sheet_names}")
 
@@ -70,13 +109,26 @@ class DataLoader:
                     logger.error(f"Error loading sheet {sheet}: {e}")
                     self.data[key] = pd.DataFrame()
 
-            # Perform basic validations
-            self._validate_data()
+            # Verify we have data
+            if not self.data or all(df.empty for df in self.data.values()):
+                logger.error("No data loaded from Excel file")
+                st.error("❌ No data loaded from the Excel file. Please check the file format.")
+                return self._create_sample_data()
+            
+            # Check if we have the essential sheets
+            has_districts = 'DIM_DISTRICT' in self.data and not self.data['DIM_DISTRICT'].empty
+            has_sales = 'FACT_SALES' in self.data and not self.data['FACT_SALES'].empty
+            
+            if not has_districts or not has_sales:
+                logger.warning("Essential sheets missing or empty")
+                st.warning("⚠️ Some essential sheets are missing or empty. Using available data.")
+            
+            self.file_found = True
             return self.data
 
-        except FileNotFoundError:
-            logger.error(f"Excel file not found at {self.file_path}")
-            st.error(f"❌ Data file not found. Please ensure 'data/V-Guard ClimateCool PowerBI Data Model and Datasets.xlsx' exists.")
+        except FileNotFoundError as e:
+            logger.error(f"Excel file not found: {e}")
+            st.error(f"❌ Data file not found: {e}")
             return self._create_sample_data()
         except Exception as e:
             logger.error(f"An unexpected error occurred while loading data: {e}")
@@ -85,35 +137,54 @@ class DataLoader:
 
     def _create_sample_data(self) -> dict:
         """Create sample data for demonstration when Excel file is not found."""
-        logger.warning("Creating sample data for demonstration purposes.")
+        st.info("📊 Using sample data for demonstration. Upload your Excel file to see real data.")
         
         # Create sample district data
         districts = pd.DataFrame({
-            'District_ID': ['DIST_001', 'DIST_002', 'DIST_003'],
-            'District_Name': ['Delhi', 'Mumbai', 'Bangalore'],
-            'State': ['Delhi', 'Maharashtra', 'Karnataka'],
-            'Pop_M': [16.79, 12.44, 8.44],
-            'CII_Score': [62.69, 45, 40],
-            'CII_Category': ['Medium', 'Medium', 'Low'],
-            'TAM_Share_Pct': [12.17, 8.5, 5.2]
+            'District_ID': ['DIST_001', 'DIST_002', 'DIST_003', 'DIST_004', 'DIST_005'],
+            'District_Name': ['Delhi', 'Mumbai', 'Bangalore', 'Chennai', 'Kolkata'],
+            'State': ['Delhi', 'Maharashtra', 'Karnataka', 'Tamil Nadu', 'West Bengal'],
+            'Pop_M': [16.79, 12.44, 8.44, 7.09, 4.5],
+            'CII_Score': [62.69, 45, 40, 35, 30],
+            'CII_Category': ['Medium', 'Medium', 'Low', 'Low', 'Low'],
+            'TAM_Share_Pct': [12.17, 8.5, 5.2, 4.8, 3.5],
+            'Latitude': [28.61, 19.08, 12.97, 13.08, 22.57],
+            'Longitude': [77.21, 72.88, 77.59, 80.27, 88.36]
         })
         
         # Create sample SKU data
         skus = pd.DataFrame({
             'SKU_ID': ['SKU_001', 'SKU_002', 'SKU_003', 'SKU_004'],
             'SKU_Name': ['Personal Tower 30L', 'Mass Desert 65L', 'Heavy Desert 90L', 'Institutional 135L'],
-            'ASP_INR': [6500, 9800, 13500, 18500]
+            'ASP_INR': [6500, 9800, 13500, 18500],
+            'Gross_Margin_Pct': [26.15, 29.59, 31.85, 32.97]
         })
         
         # Create sample sales data
-        sales = pd.DataFrame({
-            'Date_Key': ['20260101'] * 10,
-            'District_ID': ['DIST_001'] * 10,
-            'SKU_ID': ['SKU_001'] * 10,
-            'Units_Sold': [5, 8, 12, 6, 15, 9, 7, 11, 4, 13],
-            'Gross_Revenue_INR': [32500, 52000, 78000, 39000, 97500, 58500, 45500, 71500, 26000, 84500],
-            'Gross_Margin_INR': [9750, 15600, 23400, 11700, 29250, 17550, 13650, 21450, 7800, 25350]
-        })
+        sales_data = []
+        districts_list = ['DIST_001', 'DIST_002', 'DIST_003', 'DIST_004', 'DIST_005']
+        skus_list = ['SKU_001', 'SKU_002', 'SKU_003', 'SKU_004']
+        
+        import random
+        random.seed(42)
+        
+        for i, district in enumerate(districts_list):
+            for sku in skus_list:
+                for month in range(1, 13):
+                    units = random.randint(5, 50)
+                    price = 6500 if sku == 'SKU_001' else (9800 if sku == 'SKU_002' else (13500 if sku == 'SKU_003' else 18500))
+                    revenue = units * price
+                    margin = revenue * (0.26 if sku == 'SKU_001' else (0.29 if sku == 'SKU_002' else (0.31 if sku == 'SKU_003' else 0.32)))
+                    sales_data.append({
+                        'Date_Key': f'2026{month:02d}01',
+                        'District_ID': district,
+                        'SKU_ID': sku,
+                        'Units_Sold': units,
+                        'Gross_Revenue_INR': revenue,
+                        'Gross_Margin_INR': margin
+                    })
+        
+        sales = pd.DataFrame(sales_data)
         
         return {
             'DIM_DISTRICT': districts,
@@ -130,7 +201,7 @@ class DataLoader:
 
     def _validate_data(self):
         """Validate that essential sheets and columns exist."""
-        required_sheets = ['DIM_DISTRICT', 'DIM_SKU', 'FACT_WEATHER', 'FACT_SALES', 'FACT_INVENTORY', 'FACT_MARKETING']
+        required_sheets = ['DIM_DISTRICT', 'DIM_SKU', 'FACT_SALES']
         for sheet in required_sheets:
             if sheet not in self.data or self.data[sheet].empty:
                 logger.warning(f"Required sheet '{sheet}' is missing or empty.")
