@@ -1,0 +1,12 @@
+# OpenWeather API Key - Get from https://openweathermap.org/api
+# Free tier allows 60 calls/minute
+WEATHER_API_KEY=your_openweather_api_key_here
+
+# Optional: Use mock data if API fails
+USE_MOCK_WEATHER=true
+
+# Database connection (future use)
+DB_CONNECTION_STRING=postgresql://user:password@localhost:5432/climatecool
+
+# API endpoints
+WEATHER_API_BASE_URL=https://api.openweathermap.org/data/2.5/
