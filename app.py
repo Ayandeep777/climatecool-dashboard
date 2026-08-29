@@ -28,7 +28,7 @@ if 'app_data' not in st.session_state:
     st.session_state.app_data = {}
 
 if 'sample_data' not in st.session_state:
-    st.session_state.sample_data = False
+    st.session_state.sample_data = True
 
 # --- File Upload Section ---
 def handle_file_upload():
@@ -118,58 +118,89 @@ def main():
 
     # --- Sidebar Navigation ---
     st.sidebar.subheader("📊 Navigation")
-    page = st.sidebar.radio(
+    
+    # Use simple page names without emojis for internal mapping
+    page_options = {
+        "Control Tower": "control_tower",
+        "Opportunity": "opportunity",
+        "Climate Intelligence": "climate_intelligence",
+        "Demand Engine": "demand_engine",
+        "Inventory Command": "inventory_command",
+        "SKU & Dealer": "sku_dealer",
+        "Heat-Trigger Marketing": "heat_trigger_marketing",
+        "Financials": "financials",
+        "Stage Gates": "stage_gates",
+        "Data Sources": "data_sources"
+    }
+    
+    # Create display names with emojis
+    display_names = {
+        "control_tower": "🏢 Control Tower",
+        "opportunity": "📍 Opportunity",
+        "climate_intelligence": "🌤️ Climate Intelligence",
+        "demand_engine": "📈 Demand Engine",
+        "inventory_command": "📦 Inventory Command",
+        "sku_dealer": "🛒 SKU & Dealer",
+        "heat_trigger_marketing": "📢 Heat-Trigger Marketing",
+        "financials": "💰 Financials",
+        "stage_gates": "🚀 Stage Gates",
+        "data_sources": "📊 Data Sources"
+    }
+    
+    # Create a list of display names for the radio
+    display_list = list(display_names.values())
+    
+    selected_display = st.sidebar.radio(
         "Choose a Module",
-        [
-            "🏢 Control Tower",
-            "📍 Opportunity",
-            "🌤️ Climate Intelligence",
-            "📈 Demand Engine",
-            "📦 Inventory Command",
-            "🛒 SKU & Dealer",
-            "📢 Heat-Trigger Marketing",
-            "💰 Financials",
-            "🚀 Stage Gates",
-            "📊 Data Sources & Assumptions",
-        ],
+        display_list,
         index=0,
     )
+    
+    # Map back to internal page name
+    page_map = {v: k for k, v in display_names.items()}
+    page = page_map.get(selected_display, "control_tower")
 
     # --- Page Routing ---
     try:
-        if page == "🏢 Control Tower":
-            from pages import 1_Control_Tower as page_module
+        if page == "control_tower":
+            from pages import control_tower as page_module
             page_module.render(app_data)
-        elif page == "📍 Opportunity":
-            from pages import 2_Opportunity as page_module
+        elif page == "opportunity":
+            from pages import opportunity as page_module
             page_module.render(app_data)
-        elif page == "🌤️ Climate Intelligence":
-            from pages import 3_Climate_Intelligence as page_module
+        elif page == "climate_intelligence":
+            from pages import climate_intelligence as page_module
             page_module.render(app_data)
-        elif page == "📈 Demand Engine":
-            from pages import 4_Demand_Engine as page_module
+        elif page == "demand_engine":
+            from pages import demand_engine as page_module
             page_module.render(app_data)
-        elif page == "📦 Inventory Command":
-            from pages import 5_Inventory_Command as page_module
+        elif page == "inventory_command":
+            from pages import inventory_command as page_module
             page_module.render(app_data)
-        elif page == "🛒 SKU & Dealer":
-            from pages import 6_SKU_Dealer as page_module
+        elif page == "sku_dealer":
+            from pages import sku_dealer as page_module
             page_module.render(app_data)
-        elif page == "📢 Heat-Trigger Marketing":
-            from pages import 7_Heat_Trigger_Marketing as page_module
+        elif page == "heat_trigger_marketing":
+            from pages import heat_trigger_marketing as page_module
             page_module.render(app_data)
-        elif page == "💰 Financials":
-            from pages import 8_Financials as page_module
+        elif page == "financials":
+            from pages import financials as page_module
             page_module.render(app_data)
-        elif page == "🚀 Stage Gates":
-            from pages import 9_Stage_Gates as page_module
+        elif page == "stage_gates":
+            from pages import stage_gates as page_module
             page_module.render(app_data)
-        elif page == "📊 Data Sources & Assumptions":
-            from pages import 10_Data_Sources as page_module
+        elif page == "data_sources":
+            from pages import data_sources as page_module
             page_module.render(app_data)
     except ImportError as e:
         st.error(f"Error loading page: {e}")
         st.info("Please ensure all page modules exist in the 'pages' directory.")
+        # Show the Control Tower as fallback
+        try:
+            from pages import control_tower as page_module
+            page_module.render(app_data)
+        except:
+            st.warning("Unable to load any page. Please check your installation.")
 
     # --- Footer ---
     st.sidebar.markdown("---")
