@@ -1,37 +1,32 @@
 import os
-from dotenv import load_dotenv
-
-load_dotenv()
+import streamlit as st
 
 class Config:
-    """Application configuration."""
-    
-    # App Settings
     APP_TITLE = "V-Guard ClimateCool"
     APP_ICON = "🌊"
     APP_LAYOUT = "wide"
     APP_SIDEBAR_STATE = "expanded"
     
-    # Data Paths
     EXCEL_DATA_PATH = "data/V-Guard ClimateCool PowerBI Data Model and Datasets.xlsx"
     DATA_STATUS = "CURRENT ANALYTICAL SNAPSHOT"
     
-    # Weather Configuration
+    # Read from Streamlit secrets (deployment) or environment variables (local)
+    try:
+        WEATHER_API_KEY = st.secrets.get("WEATHER_API_KEY", "")
+    except:
+        WEATHER_API_KEY = os.getenv("WEATHER_API_KEY", "")
+    
+    try:
+        USE_MOCK_WEATHER = st.secrets.get("USE_MOCK_WEATHER", "true") == "true"
+    except:
+        USE_MOCK_WEATHER = os.getenv("USE_MOCK_WEATHER", "true") == "true"
+    
     LIVE_WEATHER_ENABLED = True
     USE_OPENWEATHER = True
-    USE_MOCK_WEATHER = os.getenv("USE_MOCK_WEATHER", "true").lower() == "true"
+    WEATHER_API_BASE_URL = "https://api.openweathermap.org/data/2.5/"
     
-    # OpenWeather API
-    WEATHER_API_KEY = os.getenv("WEATHER_API_KEY", "")
-    WEATHER_API_BASE_URL = os.getenv("WEATHER_API_BASE_URL", "https://api.openweathermap.org/data/2.5/")
-    
-    # Database (future use)
-    DB_CONNECTION_STRING = os.getenv("DB_CONNECTION_STRING", "")
-    
-    # Random seed for reproducibility
     RANDOM_SEED = 42
     
-    # Climate Intelligence Index Weights (Case Assumption)
     CII_WEIGHTS = {
         "heat_intensity": 0.25,
         "humidity_suitability": 0.20,
@@ -41,14 +36,13 @@ class Config:
         "ac_affordability_gap": 0.10,
     }
     
-    # Inventory Trigger Thresholds (Case Assumption)
-    INVENTORY_TRIGGERS = {
-        "green": {"min_days": 45, "max_days": 60, "action": "HOLD"},
-        "amber": {"min_days": 30, "max_days": 44, "action": "MONITOR"},
-        "red": {"min_days": 0, "max_days": 29, "action": "ACTIVATE"},
+    HEAT_SCORE_WEIGHTS = {
+        "temperature": 0.35,
+        "anomaly": 0.25,
+        "humidity": 0.20,
+        "heatwave": 0.20,
     }
     
-    # Decision Thresholds
     DECISION_THRESHOLDS = {
         "heat_score_high": 70,
         "heat_score_medium": 50,
@@ -56,18 +50,8 @@ class Config:
         "cii_medium": 50,
         "sell_through_good": 0.70,
         "roas_good": 8.0,
-        "stockout_risk": 0.20,
     }
     
-    # Weather score weights
-    HEAT_SCORE_WEIGHTS = {
-        "temperature": 0.35,
-        "anomaly": 0.25,
-        "humidity": 0.20,
-        "heatwave": 0.20,
-    }
-
-    # District coordinates for weather API
     DISTRICT_COORDINATES = {
         "Kota": {"lat": 25.18, "lon": 75.83},
         "Bikaner": {"lat": 28.01, "lon": 73.31},
