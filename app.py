@@ -1,168 +1,181 @@
 import streamlit as st
-import pandas as pd
-import numpy as np
-from datetime import datetime
-import logging
-import os
-import streamlit as st
-import pandas as pd
+import sys
 from pathlib import Path
 
-# Try to import from config, fallback if not found
-try:
-    from config import Config
-except ImportError:
-    # Fallback config if file not found
-    class Config:
-        APP_TITLE = "V-Guard ClimateCool"
-        APP_ICON = "🌊"
-        APP_LAYOUT = "wide"
-        EXCEL_DATA_PATH = "data/V-Guard ClimateCool PowerBI Data Model and Datasets.xlsx"
-        LIVE_WEATHER_ENABLED = True
-        USE_MOCK_WEATHER = True
-        WEATHER_API_KEY = ""
-        RANDOM_SEED = 42
+# Add the project root to the path
+sys.path.append(str(Path(__file__).parent))
 
-# Import from src
-try:
-    from src.data_loader import load_excel_data, get_standardized_data
-    from src.climate_engine import calculate_heat_score, calculate_cii
-    from utils.formatting import format_currency, format_number, format_timestamp, get_decision_color
-except ImportError:
-    # Fallback functions if imports fail
-    def load_excel_data(path):
-        return None
-    def get_standardized_data(data):
-        return data
-    def calculate_heat_score(row):
-        return 50
-    def calculate_cii(df):
-        return df
-    def format_currency(val):
-        return f"₹{val:,.0f}"
-    def format_number(val):
-        return f"{val:,.0f}"
-    def format_timestamp(ts):
-        return str(ts)
-    def get_decision_color(decision):
-        return "#6b7280"
+import config
+from src.data_loader import DataLoader
+from utils.logging_config import setup_logging
 
-logging.basicConfig(level=logging.INFO)
+# Initialize logger
+logger = setup_logging()
 
-# Page Config
+# Configure page
 st.set_page_config(
-    page_title=Config.APP_TITLE,
-    page_icon=Config.APP_ICON,
-    layout=Config.APP_LAYOUT,
-    initial_sidebar_state="expanded",
+    page_title="Climate-to-Commerce Control Tower",
+    page_icon="❄️",
+    layout="wide",
+    initial_sidebar_state="expanded"
 )
 
-# ========== DATA LOADING ==========
-@st.cache_data(ttl=600)
-def load_data():
-    raw_data = load_excel_data(Config.EXCEL_DATA_PATH)
-    if raw_data is None:
-        st.warning("Using sample data - Excel file not found")
-        # Create sample data if file not found
-        sample_df = pd.DataFrame({
-            'DISTRICT_NAME': ['Delhi', 'Mumbai', 'Bangalore', 'Chennai', 'Kolkata'],
-            'STATE': ['Delhi', 'Maharashtra', 'Karnataka', 'Tamil Nadu', 'West Bengal'],
-            'POP_M': [16.79, 12.44, 8.44, 7.09, 4.50],
-            'CII_SCORE': [62.69, 45.0, 40.0, 35.0, 30.0],
-        })
-        return {
-            'DIM_DISTRICT': sample_df,
-            'FACT_SALES': pd.DataFrame(),
-            'FACT_WEATHER': pd.DataFrame(),
-            'FACT_INVENTORY': pd.DataFrame(),
-            'FACT_MARKETING': pd.DataFrame(),
-            'DATA_STATUS': 'SAMPLE DATA',
-            '_LOAD_TIMESTAMP': datetime.now().isoformat(),
-        }
+# --- Initialize Session State ---
+if 'data_loaded' not in st.session_state:
+    st.session_state.data_loaded = False
+
+if 'app_data' not in st.session_state:
+    st.session_state.app_data = {}
+
+if 'sample_data' not in st.session_state:
+    st.session_state.sample_data = False
+
+# --- File Upload Section ---
+def handle_file_upload():
+    """Handle file upload for the Excel data file."""
+    st.sidebar.markdown("---")
+    st.sidebar.subheader("📁 Data Management")
     
-    processed_data = get_standardized_data(raw_data)
-    processed_data['DATA_STATUS'] = 'DATA LOADED'
-    processed_data['_LOAD_TIMESTAMP'] = datetime.now().isoformat()
-    return processed_data
-
-data = load_data()
-
-# ========== HEADER ==========
-col1, col2 = st.columns([3, 1])
-with col1:
-    st.title(f"{Config.APP_ICON} {Config.APP_TITLE}")
-    st.caption("Climate-to-Commerce Control Tower")
-
-with col2:
-    status = data.get('DATA_STATUS', 'UNKNOWN')
-    st.metric("Status", status)
-
-# ========== SIDEBAR ==========
-with st.sidebar:
-    st.header("🎯 Control Panel")
-    st.divider()
-    
-    if 'DIM_DISTRICT' in data and not data['DIM_DISTRICT'].empty:
-        districts = data['DIM_DISTRICT']['DISTRICT_NAME'].tolist()
-        selected = st.selectbox("Select District", districts)
-    
-    st.divider()
-    st.subheader("📊 Scenario Controls")
-    temp_anomaly = st.slider("Temperature Anomaly (°C)", -2.0, 5.0, 0.0, 0.5)
-    marketing_uplift = st.slider("Marketing Uplift (%)", -50, 100, 0, 10)
-
-def check_and_load_data():
-    """Check if data file exists, if not, offer upload."""
+    # Check if data is loaded
     data_dir = Path("data")
     data_dir.mkdir(exist_ok=True)
     
-    excel_files = list(data_dir.glob("*.xlsx"))
+    # Look for existing Excel file
+    existing_files = list(data_dir.glob("*.xlsx")) + list(Path(".").glob("*.xlsx"))
     
-    if not excel_files:
-        st.warning("📁 No Excel data file found in the 'data' directory.")
+    if existing_files:
+        st.sidebar.success(f"✅ Data file found: {existing_files[0].name}")
+        return True
+    
+    # Allow file upload
+    st.sidebar.warning("⚠️ No data file found")
+    uploaded_file = st.sidebar.file_uploader(
+        "Upload Excel Data File",
+        type=['xlsx'],
+        help="Upload the V-Guard ClimateCool Excel data file"
+    )
+    
+    if uploaded_file is not None:
+        # Save to data directory
+        file_path = data_dir / uploaded_file.name
+        with open(file_path, "wb") as f:
+            f.write(uploaded_file.getbuffer())
+        st.sidebar.success(f"✅ File saved: {uploaded_file.name}")
+        st.rerun()
+        return True
+    
+    return False
+
+# --- Load Data ---
+@st.cache_resource(ttl=3600)
+def load_app_data():
+    """Load and cache the entire data model."""
+    try:
+        data_loader = DataLoader()
+        app_data = data_loader.load_all()
         
-        # Allow file upload
-        uploaded_file = st.file_uploader(
-            "Upload the ClimateCool Excel data file",
-            type=['xlsx'],
-            help="Upload the Excel file from the data/ directory"
-        )
+        # Check if we're using sample data
+        is_sample = len(app_data.get('DIM_DISTRICT', pd.DataFrame())) < 10
+        st.session_state.sample_data = is_sample
         
-        if uploaded_file is not None:
-            # Save the uploaded file
-            file_path = data_dir / "V-Guard ClimateCool PowerBI Data Model and Datasets.xlsx"
-            with open(file_path, "wb") as f:
-                f.write(uploaded_file.getbuffer())
-            st.success(f"✅ File saved successfully! Loading data...")
-            st.rerun()
-        return False
-    return True
+        if is_sample:
+            logger.info("Using sample data (Excel file not found)")
+        else:
+            logger.info("Data model loaded successfully from Excel file")
+            st.session_state.data_loaded = True
+        
+        return app_data
+    except Exception as e:
+        logger.error(f"Failed to load data model: {e}")
+        st.error(f"Failed to load data: {e}")
+        return None
 
-
-
-# ========== MAIN DASHBOARD ==========
-st.header("🏢 Executive Dashboard")
-
-# Simple KPIs
-col1, col2, col3, col4 = st.columns(4)
-with col1:
-    st.metric("Total Revenue", "₹84.3 Cr", "↑ 12.5%")
-with col2:
-    st.metric("Units Sold", "19,048", "↑ 8.2%")
-with col3:
-    st.metric("Heat Score", "67.4", "↑ 3.1%")
-with col4:
-    st.metric("Active Districts", "22", "→")
-
+# --- Main App ---
 def main():
-    # Check for data file
-    if not check_and_load_data():
+    # Sidebar header
+    st.sidebar.title("❄️ ClimateCool")
+    st.sidebar.caption("V-Guard Industries")
+    st.sidebar.markdown("---")
+    
+    # Handle file upload
+    handle_file_upload()
+    
+    # Load data
+    with st.spinner("Loading the Climate-to-Commerce Control Tower..."):
+        app_data = load_app_data()
+        st.session_state.app_data = app_data
+
+    if app_data is None:
         st.stop()
 
-# Show some data
-if 'DIM_DISTRICT' in data and not data['DIM_DISTRICT'].empty:
-    st.subheader("📍 District Overview")
-    st.dataframe(data['DIM_DISTRICT'].head(10))
+    # Show data status
+    if st.session_state.sample_data:
+        st.sidebar.warning("⚠️ Using sample data")
+    else:
+        st.sidebar.success("✅ Live data loaded")
+    
+    st.sidebar.markdown("---")
 
-st.divider()
-st.caption(f"📊 {Config.APP_TITLE} | Last Updated: {format_timestamp(data.get('_LOAD_TIMESTAMP', datetime.now()))}")
+    # --- Sidebar Navigation ---
+    st.sidebar.subheader("📊 Navigation")
+    page = st.sidebar.radio(
+        "Choose a Module",
+        [
+            "🏢 Control Tower",
+            "📍 Opportunity",
+            "🌤️ Climate Intelligence",
+            "📈 Demand Engine",
+            "📦 Inventory Command",
+            "🛒 SKU & Dealer",
+            "📢 Heat-Trigger Marketing",
+            "💰 Financials",
+            "🚀 Stage Gates",
+            "📊 Data Sources & Assumptions",
+        ],
+        index=0,
+    )
+
+    # --- Page Routing ---
+    try:
+        if page == "🏢 Control Tower":
+            from pages import 1_Control_Tower as page_module
+            page_module.render(app_data)
+        elif page == "📍 Opportunity":
+            from pages import 2_Opportunity as page_module
+            page_module.render(app_data)
+        elif page == "🌤️ Climate Intelligence":
+            from pages import 3_Climate_Intelligence as page_module
+            page_module.render(app_data)
+        elif page == "📈 Demand Engine":
+            from pages import 4_Demand_Engine as page_module
+            page_module.render(app_data)
+        elif page == "📦 Inventory Command":
+            from pages import 5_Inventory_Command as page_module
+            page_module.render(app_data)
+        elif page == "🛒 SKU & Dealer":
+            from pages import 6_SKU_Dealer as page_module
+            page_module.render(app_data)
+        elif page == "📢 Heat-Trigger Marketing":
+            from pages import 7_Heat_Trigger_Marketing as page_module
+            page_module.render(app_data)
+        elif page == "💰 Financials":
+            from pages import 8_Financials as page_module
+            page_module.render(app_data)
+        elif page == "🚀 Stage Gates":
+            from pages import 9_Stage_Gates as page_module
+            page_module.render(app_data)
+        elif page == "📊 Data Sources & Assumptions":
+            from pages import 10_Data_Sources as page_module
+            page_module.render(app_data)
+    except ImportError as e:
+        st.error(f"Error loading page: {e}")
+        st.info("Please ensure all page modules exist in the 'pages' directory.")
+
+    # --- Footer ---
+    st.sidebar.markdown("---")
+    st.sidebar.caption(f"Data Snapshot: {config.LAST_REFRESH_DATE}")
+    if st.session_state.sample_data:
+        st.sidebar.caption("📌 Using sample data (Excel file not found)")
+
+if __name__ == "__main__":
+    main()
